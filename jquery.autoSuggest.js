@@ -11,7 +11,7 @@
  * the fly. It supports keybord navigation (UP + DOWN + RETURN), as well
  * as multiple AutoSuggest fields on the same page.
  *
- * Inspied by the Autocomplete plugin by: Jšrn Zaefferer
+ * Inspied by the Autocomplete plugin by: JÅ¡rn Zaefferer
  * and the Facelist plugin by: Ian Tearle (iantearle.com)
  *
  * This AutoSuggest jQuery plug-in is dual licensed under the MIT and GPL licenses:
@@ -23,6 +23,8 @@
 	$.fn.autoSuggest = function(data, options) {
 		var defaults = { 
 			asHtmlID: false,
+			replace: false,
+			inputName: false,
 			startText: "Enter Name Here",
 			emptyText: "No Results Found",
 			preFill: {},
@@ -32,6 +34,8 @@
 			searchObjProps: "value", //comma separated list of object property names
 			queryParam: "q",
 			retrieveLimit: false, //number for 'limit' param on ajax request
+			downKeyOpensSelection : true, // mik: whether clicking down arrow opens selection with query "".
+			singleValue : false, // mik false for list, true for single value
 			extraParams: "",
 			matchCase: false,
 			minChars: 1,
@@ -72,16 +76,22 @@
 				}
 				opts.start.call(this);
 				var input = $(this);
+				var existingName = input.attr("name");
+				if (opts.replace) input.removeAttr("name");
 				input.attr("autocomplete","off").addClass("as-input").attr("id",x_id).val(opts.startText);
 				var input_focus = false;
 				
 				// Setup basic elements and render them to the DOM
 				input.wrap('<ul class="as-selections" id="as-selections-'+x+'"></ul>').wrap('<li class="as-original" id="as-original-'+x+'"></li>');
+				if (opts.singleValue) input.parents('.as-selections').addClass("as-single-value");
+				
 				var selections_holder = $("#as-selections-"+x);
 				var org_li = $("#as-original-"+x);				
 				var results_holder = $('<div class="as-results" id="as-results-'+x+'"></div>').hide();
 				var results_ul =  $('<ul class="as-list"></ul>');
-				var values_input = $('<input type="hidden" class="as-values" name="as_values_'+x+'" id="as-values-'+x+'" />');
+				var values_inputName = opts.replace ? existingName : 
+					typeof opts.inputName == 'string' ? opts.inputName : 'as_values_'+x;
+				var values_input = $('<input type="hidden" class="as-values" name="'+values_inputName+'" id="as-values-'+x+'" />');
 				var prefill_value = "";
 				if(typeof opts.preFill == "string"){
 					var vals = opts.preFill.split(",");					
@@ -116,6 +126,24 @@
 					$("li.as-selection-item", selections_holder).addClass("blur").removeClass("selected");
 				}
 				input.after(values_input);
+				if (opts.singleValue==false) {
+					var clear_input = $('<input type="button" value="X" class="as-clear" id="as-clear-"'+x+'" />');
+					$(selections_holder).after(clear_input);
+					clear_input.click(function(){
+						values_input.val("");
+						//input.val(""); 
+						window.setTimeout(function (){
+							var zlen =$('li', selections_holder).length;
+							for(var z=0;z<zlen;z++)
+							{deleteItem(); 
+							deleteItem(); }
+							input.val(opts.startText);
+							input.focus();
+							//$('#as-selections-'+x+' li').empty();input.val(opts.startText);input.show();
+							},100);
+						//alert('x433ax'+$(results_ul).html() );
+					})
+				}
 				selections_holder.click(function(){
 					input_focus = true;
 					input.focus();
@@ -132,7 +160,7 @@
 						$(this).val("");
 					} else if(input_focus){
 						$("li.as-selection-item", selections_holder).removeClass("blur");
-						if($(this).val() != ""){
+						if($(this).val() != "" && opts.singleValue==false){
 							results_ul.css("width",selections_holder.outerWidth());
 							results_holder.show();
 						}
@@ -150,6 +178,7 @@
 					// track last key pressed
 					lastKeyPressCode = e.keyCode;
 					first_focus = false;
+					//console.log("" + e.keyCode)
 					switch(e.keyCode) {
 						case 38: // up
 							e.preventDefault();
@@ -159,32 +188,17 @@
 							e.preventDefault();
 							moveSelection("down");
 							break;
-						case 8:  // delete
-							if(input.val() == ""){							
-								var last = values_input.val().split(",");
-								last = last[last.length - 2];
-								selections_holder.children().not(org_li.prev()).removeClass("selected");
-								if(org_li.prev().hasClass("selected")){
-									values_input.val(values_input.val().replace(","+last+",",","));
-									opts.selectionRemoved.call(this, org_li.prev());
-								} else {
-									opts.selectionClick.call(this, org_li.prev());
-									org_li.prev().addClass("selected");		
-								}
-							}
-							if(input.val().length == 1){
-								results_holder.hide();
-								 prev = "";
-							}
-							if($(":visible",results_holder).length > 0){
-								if (timeout){ clearTimeout(timeout); }
-								timeout = setTimeout(function(){ keyChange(); }, opts.keyDelay);
-							}
+						case 46: // mik delete (del)
+						case 8:  // delete (backspace)
+							deleteItem();
 							break;
-						case 9: case 188:  // tab or comma
-							tab_press = true;
+						//case 9: 
+						case 188:  // tab or comma
+							//tab_press = true;
 							var i_input = input.val().replace(/(,)/g, "");
-							if(i_input != "" && values_input.val().search(","+i_input+",") < 0 && i_input.length >= opts.minChars){	
+							//var active = $("li.active:first", results_holder);
+							// removed this ..201401
+							if(false && active && i_input != "" && values_input.val().search(","+i_input+",") < 0 && i_input.length >= opts.minChars){	
 								e.preventDefault();
 								var n_data = {};
 								n_data[opts.selectedItemProp] = i_input;
@@ -196,12 +210,15 @@
 						case 13: // return
 							tab_press = false;
 							var active = $("li.active:first", results_holder);
-							if(active.length > 0){
+							var clicked = (active.length > 0 && active.is(':visible'));
+							if(clicked){
 								active.click();
 								results_holder.hide();
 							}
-							if(opts.neverSubmit || active.length > 0){
+							//
+							if(opts.neverSubmit || clicked  ){
 								e.preventDefault();
+								//window.document.title = (opts.neverSubmit + " " + clicked + " " + active.length + " " + new Date());
 							}
 							break;
 						default:
@@ -225,34 +242,37 @@
 					if (string == prev) return;
 					prev = string;
 					if (string.length >= opts.minChars) {
-						selections_holder.addClass("loading");
-						if(d_type == "string"){
-							var limit = "";
-							if(opts.retrieveLimit){
-								limit = "&limit="+encodeURIComponent(opts.retrieveLimit);
-							}
-							if(opts.beforeRetrieve){
-								string = opts.beforeRetrieve.call(this, string);
-							}
-							$.getJSON(req_string+"?"+opts.queryParam+"="+encodeURIComponent(string)+limit+opts.extraParams, function(data){ 
-								d_count = 0;
-								var new_data = opts.retrieveComplete.call(this, data);
-								for (k in new_data) if (new_data.hasOwnProperty(k)) d_count++;
-								processData(new_data, string); 
-							});
-						} else {
-							if(opts.beforeRetrieve){
-								string = opts.beforeRetrieve.call(this, string);
-							}
-							processData(org_data, string);
-						}
+						showSelectionsList(string);
 					} else {
 						selections_holder.removeClass("loading");
 						results_holder.hide();
 					}
 				}
+				function showSelectionsList(string) {
+					selections_holder.addClass("loading");
+					if(d_type == "string"){
+						var limit = "";
+						if(opts.retrieveLimit){
+							limit = "&limit="+encodeURIComponent(opts.retrieveLimit);
+						}
+						if(opts.beforeRetrieve){
+							string = opts.beforeRetrieve.call(this, string);
+						}
+						$.getJSON(req_string+"?"+opts.queryParam+"="+encodeURIComponent(string)+limit+opts.extraParams, function(data){ 
+							d_count = 0;
+							var new_data = opts.retrieveComplete.call(this, data);
+							for (k in new_data) if (new_data.hasOwnProperty(k)) d_count++;
+							processData(new_data, string); 
+						});
+					} else {
+						if(opts.beforeRetrieve){
+							string = opts.beforeRetrieve.call(this, string);
+						}
+						processData(org_data, string);
+					}
+				}
 				var num_count = 0;
-				function processData(data, query){
+				function processData(data, query){ 
 					if (!opts.matchCase){ query = query.toLowerCase(); }
 					var matchCount = 0;
 					results_holder.html(results_ul.html("")).hide();
@@ -270,13 +290,19 @@
 								str = str+data[num][name]+" ";
 							}
 						}
+						var pieces = query.split(' ');
 						if(str){
 							if (!opts.matchCase){ str = str.toLowerCase(); }				
-							if(str.search(query) != -1 && values_input.val().search(","+data[num][opts.selectedValuesProp]+",") == -1){
-								forward = true;
+							for (x in pieces) {
+								var piece = pieces[x];
+								if(str.search(piece) != -1 && values_input.val().search(","+data[num][opts.selectedValuesProp]+",") == -1){
+									forward = true;
+									break;
+								}
 							}	
 						}
-						if(forward){
+						// if (forward) then print element
+						if(true || forward){
 							var formatted = $('<li class="as-result-item" id="as-result-item-'+num+'"></li>').click(function(){
 									var raw_data = $(this).data("data");
 									var number = raw_data.num;
@@ -294,14 +320,19 @@
 									$(this).addClass("active");
 								}).data("data",{attributes: data[num], num: num_count});
 							var this_data = $.extend({},data[num]);
-							if (!opts.matchCase){ 
-								var regx = new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + query + ")(?![^<>]*>)(?![^&;]+;)", "gi");
-							} else {
-								var regx = new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + query + ")(?![^<>]*>)(?![^&;]+;)", "g");
-							}
 							
 							if(opts.resultsHighlight){
-								this_data[opts.selectedItemProp] = this_data[opts.selectedItemProp].replace(regx,"<em>$1</em>");
+								for (x in pieces) {
+									var piece = pieces[x];
+									if (!isWsOnly(piece)) {
+										if (!opts.matchCase){ 
+											var regx = new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + piece + ")(?![^<>]*>)(?![^&;]+;)", "gi");
+										} else {
+											var regx = new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + piece + ")(?![^<>]*>)(?![^&;]+;)", "g");
+										}
+										this_data[opts.selectedItemProp] = this_data[opts.selectedItemProp].replace(regx,"<em>$1</em>");
+									}
+								}
 							}
 							if(!opts.formatList){
 								formatted = formatted.html(this_data[opts.selectedItemProp]);
@@ -323,22 +354,69 @@
 					opts.resultsComplete.call(this);
 				}
 				
+				function isSingleAndFilled() {
+					return opts.singleValue && values_input.val() != "";
+				}
+				
 				function add_selected_item(data, num){
-					values_input.val(values_input.val()+data[opts.selectedValuesProp]+",");
+					//console.log("add [" + values_input.val() + "] value " + num)
+					if(isSingleAndFilled()) {
+						// mv single value
+						deleteItem();
+						deleteItem();
+						//return;
+					}
+					var val = values_input.val();
+					// cannot (opts.singleValue ? "" : ",")
+					values_input.val(val+data[opts.selectedValuesProp]+ ",");
 					var item = $('<li class="as-selection-item" id="as-selection-'+num+'"></li>').click(function(){
 							opts.selectionClick.call(this, $(this));
 							selections_holder.children().removeClass("selected");
 							$(this).addClass("selected");
 						}).mousedown(function(){ input_focus = false; });
 					var close = $('<a class="as-close">&times;</a>').click(function(){
-							values_input.val(values_input.val().replace(","+data[opts.selectedValuesProp]+",",","));
+							// MV fix for first
+							values_input.val(val.length==0 ? "" : values_input.val().replace(","+data[opts.selectedValuesProp]+",",","));
 							opts.selectionRemoved.call(this, item);
 							input_focus = true;
+							input.show();
 							input.focus();
 							return false;
 						});
 					org_li.before(item.html(data[opts.selectedItemProp]).prepend(close));
 					opts.selectionAdded.call(this, org_li.prev());	
+					if(isSingleAndFilled()) {
+						//input.hide();
+					} 
+				}
+				
+				function deleteItem() {
+					if(input.val() == ""){	
+						var lastArr = values_input.val().split(",");
+						//console.log("here" + lastArr.length)
+						var last = lastArr[lastArr.length - 2];
+						selections_holder.children().not(org_li.prev()).removeClass("selected");
+						if(org_li.prev().hasClass("selected")){
+							//console.log("before " + values_input.val());
+							// MV fix for first (has no comma in front)
+							values_input.val(lastArr.length==2 ? "" : values_input.val().replace(","+last+",",","));
+							//console.log("a f " + values_input.val());
+							opts.selectionRemoved.call(this, org_li.prev());
+						} else {
+							opts.selectionClick.call(this, org_li.prev());
+							org_li.prev().addClass("selected");		
+						}
+					}
+					if(input.val().length == 1){
+						results_holder.hide();
+						 prev = "";
+					}
+					//alert("show")
+					input.show(); // MV
+					if($(":visible",results_holder).length > 0){
+						if (timeout){ clearTimeout(timeout); }
+						timeout = setTimeout(function(){ keyChange(); }, opts.keyDelay);
+					}
 				}
 				
 				function moveSelection(direction){
@@ -356,11 +434,26 @@
 							} else {
 								start = active.prev();
 							}	
-						}
+						} 
+						//if (start.prev().get(0) == lis.filter(":last").get(0)) alert('end');
 						lis.removeClass("active");
 						start.addClass("active");
+					} else {
+						//alert("should open list");
+						if (opts.downKeyOpensSelection)showSelectionsList("");
 					}
 				}
+				
+				function isWsOnly(s) {
+					for (i=0,len=s.length;i<len;i++) {
+						if (!isWs(s.charAt(i))) return false;
+					}
+					return true;
+				}
+				function isWs(s) {
+					return s==' ' || s=='\t' || s=='\n';
+				}
+				
 									
 			});
 		}
